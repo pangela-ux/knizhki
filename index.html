@@ -139,7 +139,15 @@ ul{padding:0;list-style:none}
 
 .age-head{font-family:var(--display);font-weight:900;font-size:1.9rem;line-height:1;margin:28px 0 14px}
 .age-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:28px 0 14px}
-.age-row .age-head{margin:0}
+.age-row .age-head{margin:0;flex:1;min-width:0}
+.age-row{gap:8px}
+.sort-ic{position:relative;flex:none;display:grid;place-items:center;width:36px;height:36px;border:1.5px solid var(--line);border-radius:50%;background:var(--card);color:var(--ink)}
+.sort-ic .ic{width:17px;height:17px}
+.sort-ic select{position:absolute;inset:0;width:100%;height:100%;opacity:0;font-size:16px}
+.grid > li{display:flex}
+.grid .tile{display:flex;flex-direction:column;width:100%;height:100%}
+.grid .tile-title{min-height:2.4em;line-height:1.2}
+.grid .tile-sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .toolbar + .age-row,.toolbar + .hint + .age-row{margin-top:6px}
 .recap-box{background:var(--paper);border-radius:14px;min-height:120px;display:grid;place-items:center;overflow:hidden}
 .recap-box img{display:block;width:100%;height:auto}
@@ -940,6 +948,7 @@ var IC = {
   clock: '<circle cx="12" cy="12" r="8.500"/><path d="M12 7.500V12l3 2"/>',
   phone: '<path d="M6.500 3.500h3l1.500 4-2 1.500a11 11 0 0 0 6 6l1.500-2 4 1.500v3a2 2 0 0 1-2 2A15 15 0 0 1 4.500 5.500a2 2 0 0 1 2-2z"/>',
   copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
+  sort: '<path d="M7 4v16M4 7l3-3 3 3M17 20V4M14 17l3 3 3-3"/>',
   share: '<circle cx="18" cy="5" r="2.500"/><circle cx="6" cy="12" r="2.500"/><circle cx="18" cy="19" r="2.500"/><path d="M8.200 10.800l7.600-4.500M8.200 13.200l7.600 4.500"/>',
   upload: '<path d="M12 15V4M8 8l4-4 4 4M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/>',
   repeat: '<path d="M17 3l3 3-3 3M4 11V9a3 3 0 0 1 3-3h13M7 21l-3-3 3-3M20 13v2a3 3 0 0 1-3 3H4"/>',
@@ -1115,14 +1124,16 @@ function sortCmp(){
     'author': function(a, b){ return (a.author || '').localeCompare(b.author || '', 'bg') || byTitle(a, b); }
   }[S.sort] || byNew;
 }
+function sortIcon(){
+  return '<label class="sort-ic" title="Подреди">' + ic('sort') + '<select class="sortSel" aria-label="Подреди">' +
+    SORTS.map(function(o){ return '<option value="' + o[0] + '"' + (S.sort === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>';
+}
 function viewRead(){
   if (!isLoaded()) return '<p class="empty">Зареждам книгите…</p>';
   var all = readBooks();
   if (!all.length) return '<p class="empty">Още няма прочетени книги. Отметни първата в „Сега“ и тя ще се появи тук с корицата си.</p>';
   var seg = function(v, label){ return '<button data-act="seg" data-v="' + v + '" aria-pressed="' + (S.seg === v) + '">' + label + '</button>'; };
-  var html = statsHTML(all) + '<div class="toolbar"><div class="seg" role="group" aria-label="Изглед">' + seg('all', 'Всички') + seg('fav', 'Любими') + seg('chron', 'По възраст') + '</div>' +
-    '<label class="sortbox">Подреди<select id="sortSel">' + SORTS.map(function(o){ return '<option value="' + o[0] + '"' + (S.sort === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>';
-  html += '</div>';
+  var html = statsHTML(all) + '<div class="toolbar"><div class="seg" role="group" aria-label="Изглед">' + seg('all', 'Всички') + seg('fav', 'Любими') + seg('chron', 'По възраст') + '</div></div>';
   if (S.seg === 'fav'){
     if (!all.some(function(b){ return readingsOf(b).some(isFav); })) return html + '<p class="empty">Още няма любими. Любими са книгите с пет звезди.</p>';
     return html + chronHTML(all, true);
@@ -1189,7 +1200,7 @@ function chronHTML(read, favOnly){
     g.items.sort(function(a, b){ return (b.b.again ? 1 : 0) - (a.b.again ? 1 : 0) || cmp(a.b, b.b); });
     if (favOnly) g.line = plural(g.items.length, 'любима книга', 'любими книги') + ' с пет звезди';
     RECAP[g.key] = g;
-    html += '<div class="age-row"><h2 class="age-head">' + esc(g.head) + '</h2><button class="btn mini" data-act="recap" data-id="' + esc(g.key) + '">' + ic('image') + 'Равносметка</button></div><ul class="grid">' + g.items.map(function(x){ return tileHTML(x.b, x.sub); }).join('') + '</ul>';
+    html += '<div class="age-row"><h2 class="age-head">' + esc(g.head) + '</h2><button class="btn mini" data-act="recap" data-id="' + esc(g.key) + '">' + ic('image') + 'Равносметка</button>' + sortIcon() + '</div><ul class="grid">' + g.items.map(function(x){ return tileHTML(x.b, x.b.publisher || x.b.author || ''); }).join('') + '</ul>';
   });
   return html;
 }
@@ -1611,6 +1622,7 @@ function sheetSettings(){
     '<label class="field">Най-много книги на едно взимане<input type="number" id="sMax" min="1" max="30" inputmode="numeric" value="' + maxPer() + '"></label>' +
     '<label class="field">Напомняне колко дни преди срока<input type="number" id="sRemind" min="1" max="60" inputmode="numeric" value="' + remindDays() + '"></label>' +
     '<button class="btn primary block" data-act="save-settings">Запази настройките</button>' +
+    '<p class="small" style="text-align:center;margin:-4px 0 0">Версия ' + APP_VERSION + '</p>' +
     '<div><p class="pick-h" style="margin-top:6px">Библиотеки</p>' +
       libs().map(function(l){
         return '<button class="pick" data-act="lib-edit" data-id="' + esc(l.id) + '">' + libBadge(l) + '<span class="row-text"><span class="row-title">' + esc(l.name) + '</span>' +
@@ -2460,7 +2472,7 @@ sheetBody.addEventListener('input', function(e){
 document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && S.sheet) closeSheet(); });
 
 view.addEventListener('change', function(e){
-  if (e.target.id === 'sortSel'){ S.sort = e.target.value; try { localStorage.setItem('lib.sort', S.sort); } catch (err) {} renderView(); }
+  if (e.target.classList && e.target.classList.contains('sortSel')){ S.sort = e.target.value; try { localStorage.setItem('lib.sort', S.sort); } catch (err) {} renderView(); }
 });
 view.addEventListener('click', function(e){
   var t = e.target.closest('[data-act]'); if (!t) return;
@@ -2520,6 +2532,7 @@ function applyTheme(t){
 function setTheme(t){ try { if (t) localStorage.setItem('lib.theme', t); else localStorage.removeItem('lib.theme'); } catch (err) {} applyTheme(t); }
 window.__hostTheme = document.documentElement.getAttribute('data-theme') || '';
 applyTheme(getTheme());
+var APP_VERSION = 9;
 function start(){
   try { var t = localStorage.getItem('lib.tab'); if (t === 'lists' || t === 'read') S.tab = t; var so = localStorage.getItem('lib.sort'); if (so && SORTS.some(function(o){ return o[0] === so; })) S.sort = so; } catch (err) {}
   renderAll();
