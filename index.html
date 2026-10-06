@@ -1122,16 +1122,14 @@ function viewRead(){
   var seg = function(v, label){ return '<button data-act="seg" data-v="' + v + '" aria-pressed="' + (S.seg === v) + '">' + label + '</button>'; };
   var html = statsHTML(all) + '<div class="toolbar"><div class="seg" role="group" aria-label="Изглед">' + seg('all', 'Всички') + seg('fav', 'Любими') + seg('chron', 'По възраст') + '</div>' +
     '<label class="sortbox">Подреди<select id="sortSel">' + SORTS.map(function(o){ return '<option value="' + o[0] + '"' + (S.sort === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>';
-  var favAll = all.filter(isFav), wrapB = function(b){ return { b: b }; };
-  RECAP['__all'] = { key: '__all', head: 'Досега', items: all.map(wrapB) };
-  RECAP['__fav'] = { key: '__fav', head: 'Любими', line: plural(favAll.length, 'книга', 'книги') + ' с пет звезди', items: favAll.map(wrapB) };
-  if (S.seg !== 'fav' || favAll.length) html += '<button class="btn mini" data-act="recap" data-id="' + (S.seg === 'fav' ? '__fav' : '__all') + '">' + ic('image') + (S.seg === 'chron' ? 'Обща равносметка' : 'Равносметка') + '</button>';
   html += '</div>';
-  if (S.seg === 'chron') return html + chronHTML(all);
-  var shown = (S.seg === 'fav' ? all.filter(isFav) : all).slice().sort(sortCmp());
-  if (!shown.length) return html + '<p class="empty">Още няма любими. Любими са книгите с пет звезди.</p>';
-  return html + '<ul class="grid">' + shown.map(function(b){ return tileHTML(b, b.author); }).join('') + '</ul>';
+  if (S.seg === 'fav'){
+    if (!all.some(function(b){ return readingsOf(b).some(isFav); })) return html + '<p class="empty">Още няма любими. Любими са книгите с пет звезди.</p>';
+    return html + chronHTML(all, true);
+  }
+  return html + chronHTML(all, false);
 }
+
 var ST_ICONS = {
   book: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6c-2-1.300-4.500-2-8-2v14c3.500 0 6 .7 8 2 2-1.300 4.500-2 8-2V4c-3.500 0-6 .7-8 2z"/><path d="M12 6v14"/></svg>',
   cal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.500" y="5" width="17" height="15" rx="2.500"/><path d="M3.500 10h17M8 3v4M16 3v4"/></svg>',
@@ -1167,25 +1165,29 @@ function statsHTML(read){
     (ta.length || tp.length ? '<div class="st-card"><div class="st-heads">' + head('a', 'Топ автори', ta) + head('p', 'Топ издателства', tp) + '</div>' + body('a', ta) + body('p', tp) + '</div>' : '');
 }
 
-function chronHTML(read){
+/* every view is grouped by the child's age; favOnly keeps just the five-star readings */
+function chronHTML(read, favOnly){
   var html = '', birth = S.settings.birth, groups = [], idx = {};
   if (!birth && S.canWrite){
     html += '<div class="hint"><p>Въведи рождената дата на детето и книгите ще се подредят по възраст.</p><button class="btn" data-act="settings">Въведи рождена дата</button></div>';
   }
   var entries = [];
   read.forEach(function(b){ readingsOf(b).forEach(function(v){ entries.push(v); }); });
+  if (favOnly) entries = entries.filter(isFav);
   entries.sort(function(a, b){ return (b.readAt || '').localeCompare(a.readAt || ''); });
   entries.forEach(function(b){
     var a = birth ? ageAt(birth, b.readAt) : null, key, head, sub;
     if (a){ key = 'a' + a.y; head = ageHeading(a.y); sub = ageText(a); }
     else { key = 'y' + (b.readAt || '').slice(0, 4); head = (b.readAt || '').slice(0, 4) || 'Без дата'; sub = fmt(b.readAt); }
-    if (!idx[key]){ idx[key] = { key: key, head: head, items: [] }; groups.push(idx[key]); }
+    if (favOnly) key = 'f' + key;
+    if (!idx[key]){ idx[key] = { key: key, head: head, items: [] }; if (favOnly) idx[key].title = 'Любими'; groups.push(idx[key]); }
     idx[key].items.push({ b: b, sub: sub });
   });
   var cmp = sortCmp();
   if (S.sort === 'old') groups.reverse();
   groups.forEach(function(g){
     g.items.sort(function(a, b){ return (b.b.again ? 1 : 0) - (a.b.again ? 1 : 0) || cmp(a.b, b.b); });
+    if (favOnly) g.line = plural(g.items.length, 'любима книга', 'любими книги') + ' с пет звезди';
     RECAP[g.key] = g;
     html += '<div class="age-row"><h2 class="age-head">' + esc(g.head) + '</h2><button class="btn mini" data-act="recap" data-id="' + esc(g.key) + '">' + ic('image') + 'Равносметка</button></div><ul class="grid">' + g.items.map(function(x){ return tileHTML(x.b, x.sub); }).join('') + '</ul>';
   });
@@ -1599,7 +1601,9 @@ function sheetSearch(){
     '<div id="srList">' + searchResults('') + '</div>';
 }
 function sheetSettings(){
+  var th = getTheme(), thBtn = function(v, label){ return '<button data-act="theme" data-v="' + v + '" aria-pressed="' + (th === v) + '">' + label + '</button>'; };
   return '<h2 class="sheet-title" id="sheetTitle">Настройки</h2><div class="stack">' +
+    '<div class="field">Тема<div class="seg" role="group" aria-label="Тема" style="margin:0">' + thBtn('', 'Като телефона') + thBtn('light', 'Светла') + thBtn('dark', 'Тъмна') + '</div></div>' +
     '<label class="field">Име на детето<input id="sChild" value="' + esc(S.settings.child || '') + '" autocomplete="off"></label>' +
     '<label class="field">Рождена дата<input type="date" id="sBirth" value="' + esc(S.settings.birth || '') + '" max="' + today() + '"></label>' +
     '<p class="small">С рождената дата хрониката показва на каква възраст е четена всяка книга.</p>' +
@@ -1939,7 +1943,7 @@ function buildRecap(g){
     x.fillStyle = '#3D3660'; x.fillRect(0, 0, W, H);
     x.fillStyle = '#4A4474'; x.beginPath(); x.arc(W - 60, 80, 330, 0, 6.3); x.fill();
     x.textAlign = 'left'; x.textBaseline = 'alphabetic';
-    x.fillStyle = '#FBAF10'; x.font = '900 150px ' + F_DISPLAY; x.fillText(g.head, 70, 200);
+    x.fillStyle = '#FBAF10'; var hf = 150; x.font = '900 ' + hf + 'px ' + F_DISPLAY; while (hf > 80 && x.measureText(g.head).width > W - 300){ hf -= 6; x.font = '900 ' + hf + 'px ' + F_DISPLAY; } x.fillText(g.head, 70, 200);
     x.fillStyle = '#FFFFFF'; x.font = '900 76px ' + F_DISPLAY;
     var n = books.length, line = g.line || (who ? who + ' прочете ' : 'прочетохме ') + plural(n, 'книга', 'книги');
     wrapLines(x, line, W - 140).forEach(function(l, k){ x.fillText(l, 70, 300 + k * 80); });
@@ -1998,7 +2002,7 @@ function shareBook(id){
 }
 function sheetRecap(key){
   var g = RECAP[key]; if (!g) return null;
-  return '<h2 class="sheet-title" id="sheetTitle">Равносметка: ' + esc(g.head) + '</h2><div class="stack">' +
+  return '<h2 class="sheet-title" id="sheetTitle">Равносметка: ' + esc(g.title ? g.title + ', ' + g.head.charAt(0).toLowerCase() + g.head.slice(1) : g.head) + '</h2><div class="stack">' +
     '<div class="recap-box" id="recapBox"><p class="small">Рисувам картинката…</p></div>' +
     '<button class="btn primary block" data-act="recap-share" disabled>' + ic('share') + 'Прати или запази картинката</button>' +
     '<p class="small">В картинката влизат до шест книги: първо четените пак и пак, после най-високо оценените.</p></div>';
@@ -2302,6 +2306,7 @@ function onSheetClick(e){
         });
       break;
     case 'share': shareBook(id); break;
+    case 'theme': setTheme(t.getAttribute('data-v')); sheetBody.querySelectorAll('[data-act="theme"]').forEach(function(x){ x.setAttribute('aria-pressed', String(x.getAttribute('data-v') === getTheme())); }); break;
     case 'sr-open': S.sheet = { kind: 'book', id: t.getAttribute('data-b') }; S.confirm = null; sheetBody.innerHTML = ''; renderSheet(true); sheetEl.scrollTop = 0; if (S.books.get(S.sheet.id)) prepareShare(S.books.get(S.sheet.id)); break;
     case 'reread':
       if (b && b.status === 'read') upd('books', id, { past: pastOf(b).concat([{ at: b.readAt, rating: rating(b), note: b.note || '', again: !!b.again }]), readAt: today(), rating: 0, fav: false, note: '', again: false })
@@ -2506,6 +2511,15 @@ function subFail(e){
   if (window.console) console.error(e);
   S.canWrite = false; showNotice('Връзката с библиотеката прекъсна. Презареди страницата.'); renderAll();
 }
+function getTheme(){ var t = ''; try { t = localStorage.getItem('lib.theme') || ''; } catch (err) {} return t === 'light' || t === 'dark' ? t : ''; }
+function applyTheme(t){
+  if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+  else if (!window.__hostTheme) document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', window.__hostTheme);
+}
+function setTheme(t){ try { if (t) localStorage.setItem('lib.theme', t); else localStorage.removeItem('lib.theme'); } catch (err) {} applyTheme(t); }
+window.__hostTheme = document.documentElement.getAttribute('data-theme') || '';
+applyTheme(getTheme());
 function start(){
   try { var t = localStorage.getItem('lib.tab'); if (t === 'lists' || t === 'read') S.tab = t; var so = localStorage.getItem('lib.sort'); if (so && SORTS.some(function(o){ return o[0] === so; })) S.sort = so; } catch (err) {}
   renderAll();

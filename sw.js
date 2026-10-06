@@ -1,5 +1,5 @@
 /* Offline support: keeps the page, fonts and icons on the device. Bump VERSION when index.html changes. */
-const VERSION = 'knizhki-3';
+const VERSION = 'knizhki-6';
 const CORE = ['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon.png',
   './fonts/sofia-sans-cyrillic-400-normal.woff2', './fonts/sofia-sans-cyrillic-600-normal.woff2', './fonts/sofia-sans-cyrillic-800-normal.woff2',
   './fonts/sofia-sans-latin-400-normal.woff2', './fonts/sofia-sans-latin-600-normal.woff2', './fonts/sofia-sans-latin-800-normal.woff2',
