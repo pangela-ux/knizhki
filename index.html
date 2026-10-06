@@ -1121,7 +1121,12 @@ function viewRead(){
   if (!all.length) return '<p class="empty">Още няма прочетени книги. Отметни първата в „Сега“ и тя ще се появи тук с корицата си.</p>';
   var seg = function(v, label){ return '<button data-act="seg" data-v="' + v + '" aria-pressed="' + (S.seg === v) + '">' + label + '</button>'; };
   var html = statsHTML(all) + '<div class="toolbar"><div class="seg" role="group" aria-label="Изглед">' + seg('all', 'Всички') + seg('fav', 'Любими') + seg('chron', 'По възраст') + '</div>' +
-    '<label class="sortbox">Подреди<select id="sortSel">' + SORTS.map(function(o){ return '<option value="' + o[0] + '"' + (S.sort === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label></div>';
+    '<label class="sortbox">Подреди<select id="sortSel">' + SORTS.map(function(o){ return '<option value="' + o[0] + '"' + (S.sort === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>';
+  var favAll = all.filter(isFav), wrapB = function(b){ return { b: b }; };
+  RECAP['__all'] = { key: '__all', head: 'Досега', items: all.map(wrapB) };
+  RECAP['__fav'] = { key: '__fav', head: 'Любими', line: plural(favAll.length, 'книга', 'книги') + ' с пет звезди', items: favAll.map(wrapB) };
+  if (S.seg !== 'fav' || favAll.length) html += '<button class="btn mini" data-act="recap" data-id="' + (S.seg === 'fav' ? '__fav' : '__all') + '">' + ic('image') + (S.seg === 'chron' ? 'Обща равносметка' : 'Равносметка') + '</button>';
+  html += '</div>';
   if (S.seg === 'chron') return html + chronHTML(all);
   var shown = (S.seg === 'fav' ? all.filter(isFav) : all).slice().sort(sortCmp());
   if (!shown.length) return html + '<p class="empty">Още няма любими. Любими са книгите с пет звезди.</p>';
@@ -1936,7 +1941,7 @@ function buildRecap(g){
     x.textAlign = 'left'; x.textBaseline = 'alphabetic';
     x.fillStyle = '#FBAF10'; x.font = '900 150px ' + F_DISPLAY; x.fillText(g.head, 70, 200);
     x.fillStyle = '#FFFFFF'; x.font = '900 76px ' + F_DISPLAY;
-    var n = books.length, line = (who ? who + ' прочете ' : 'прочетохме ') + plural(n, 'книга', 'книги');
+    var n = books.length, line = g.line || (who ? who + ' прочете ' : 'прочетохме ') + plural(n, 'книга', 'книги');
     wrapLines(x, line, W - 140).forEach(function(l, k){ x.fillText(l, 70, 300 + k * 80); });
     var cols = top.length <= 4 && top.length !== 3 ? 2 : 3, rows = Math.ceil(top.length / cols);
     var gap = 34, areaTop = 400, areaH = 720;
