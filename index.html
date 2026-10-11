@@ -386,7 +386,7 @@ html{background:var(--navy)}
 
 /* round check like the catalogue's plus button */
 .check span{width:36px;height:36px;border-radius:50%;border:0;background:var(--card);box-shadow:inset 0 0 0 1.5px var(--muted);color:var(--muted)}
-.check svg{opacity:.45}
+.check svg{opacity:0}
 .check[aria-checked="true"] span{background:var(--accent);color:var(--on-accent);box-shadow:none}
 .check[aria-checked="true"] svg{opacity:1}
 
@@ -438,6 +438,7 @@ html{background:var(--navy)}
 /* sheets */
 .sheet{border-radius:26px 26px 0 0}
 .toast{background:var(--navy);color:#fff;border-radius:999px}
+.rows-cap{margin:0 6px 6px;text-align:right;font-size:.82rem;color:var(--muted)}
 .pickrow{display:flex;align-items:center;gap:8px}
 .pickrow .checkline{flex:1;min-width:0}
 .pickrow.nope .checkline span{color:var(--muted);text-decoration:line-through}
@@ -541,7 +542,16 @@ details.lib-sec .stack{margin-top:10px}
   function clone(v){ return v == null ? v : JSON.parse(JSON.stringify(v)); }
   function tx(store, mode){ return idb.transaction(store, mode).objectStore(store); }
   function done(req){ return new Promise(function(res, rej){ req.onsuccess = function(){ res(req.result); }; req.onerror = function(){ rej(req.error); }; }); }
-  function persist(path){ try { if (path in mem) tx('docs', 'readwrite').put(mem[path], path); else tx('docs', 'readwrite').delete(path); } catch (e) { if (window.console) console.error(e); } }
+  function persist(path){
+    return new Promise(function(res, rej){
+      try {
+        var t = idb.transaction('docs', 'readwrite'), s = t.objectStore('docs');
+        if (path in mem) s.put(mem[path], path); else s.delete(path);
+        t.oncomplete = function(){ res(); };
+        t.onabort = t.onerror = function(){ if (window.console) console.error(t.error); rej({ code: 'unavailable', message: 'not saved on this device' }); };
+      } catch (e) { if (window.console) console.error(e); rej({ code: 'unavailable', message: 'not saved on this device' }); }
+    });
+  }
   function fire(){ subs.slice().forEach(function(f){ try { f(); } catch (e) { if (window.console) console.error(e); } }); }
   function snap(path){ var v = mem[path]; return { id: path.split('/').pop(), exists: v !== undefined, data: function(){ return clone(v); }, metadata: {} }; }
   function genId(){ n++; return 'x' + Date.now().toString(36) + n.toString(36) + Math.random().toString(36).slice(2, 6); }
@@ -549,12 +559,12 @@ details.lib-sec .stack{margin-top:10px}
     return {
       id: path.split('/').pop(), path: path,
       get: function(){ return Promise.resolve(snap(path)); },
-      set: function(d){ mem[path] = clone(d); persist(path); fire(); return Promise.resolve(); },
+      set: function(d){ mem[path] = clone(d); var p = persist(path); fire(); return p; },
       update: function(d){
         if (mem[path] === undefined) return Promise.reject({ code: 'invalid_argument', message: 'no such document' });
-        mem[path] = Object.assign({}, mem[path], clone(d)); persist(path); fire(); return Promise.resolve();
+        mem[path] = Object.assign({}, mem[path], clone(d)); var p = persist(path); fire(); return p;
       },
-      delete: function(){ delete mem[path]; persist(path); fire(); return Promise.resolve(); },
+      delete: function(){ delete mem[path]; var p = persist(path); fire(); return p; },
       onSnapshot: function(next){ var f = function(){ next(snap(path)); }; subs.push(f); setTimeout(f, 0); return function(){ subs = subs.filter(function(x){ return x !== f; }); }; },
       collection: function(sub){ return colRef(path + '/' + sub); }
     };
@@ -982,6 +992,8 @@ function ic(n){ return '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="
 var CHECK = '<span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>';
 var DOTS = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>';
 
+/* a library book that has never been taken home, or one still to be bought, cannot be ticked as read from the list */
+function canTick(b){ return b.status === 'read' || !!b.borrowedAt || (!isLib(b) && !b.wish); }
 function rowHTML(b, inLoans){
   var read = b.status === 'read';
   var meta = read ? 'Прочетена на ' + fmt(b.readAt) + (b.borrowedAt && b.returnedAt ? ', върната' : '')
@@ -994,7 +1006,7 @@ function rowHTML(b, inLoans){
       '<span class="thumb">' + coverHTML(b, 'mini') + '</span>' +
       '<span class="row-text"><span class="row-title">' + esc(b.title) + '</span><span class="row-meta">' + esc(meta) + '</span></span>' +
     '</button>' +
-    '<button class="check" role="checkbox" aria-checked="' + read + '" data-act="toggle" data-id="' + esc(b.id) + '" aria-label="' + esc(b.title) + ', прочетена"' + (S.canWrite ? '' : ' disabled') + '>' + CHECK + '</button>' +
+    (canTick(b) ? '<button class="check" role="checkbox" aria-checked="' + read + '" data-act="toggle" data-id="' + esc(b.id) + '" aria-label="' + esc(b.title) + ', прочетена"' + (S.canWrite ? '' : ' disabled') + '>' + CHECK + '</button>' : '') +
   '</li>';
 }
 
@@ -1056,6 +1068,7 @@ function loansHTML(){
       '<p class="loan-sub">' + (lage ? 'За ' + esc(lage.replace(/\.$/, '')) + '. ' : '') + (manyLibs() ? libBadge(lib, 'sm') + esc(lib.name) + '. ' : '') + 'Връщане до ' + fmt(due) + ', прочетени ' + readN + ' от ' + bs.length + (ext ? ', удължено ' + ext + ' от 2' : '') + '.' + esc(thursdayNote(due, lib)) +
         (S.canWrite ? ' <button class="linkbtn" data-act="loan-date" data-key="' + esc(key) + '">Взети на ' + fmt(bs[0].borrowedAt) + ', смени датата</button>' : ' Взети на ' + fmt(bs[0].borrowedAt) + '.') + '</p>' +
       '<div class="bar"><i style="width:' + pct + '%"></i></div>' +
+      (S.canWrite && readN < bs.length ? '<p class="rows-cap">Отметни книгата, когато я прочетете</p>' : '') +
       '<ul class="rows">' + bs.map(function(b){ return rowHTML(b, true); }).join('') + '</ul>' +
       (S.canWrite ? '<div class="rowbtns">' + calLink(due, bs) +
         (ext < 2 && left >= 0 ? '<button class="btn quiet" data-act="extend" data-key="' + esc(key) + '">' + ic('clock') + '<span class="nowrap">Удължих срока</span></button>' : '') +
@@ -1376,26 +1389,38 @@ function listOptions(){
   });
   return o + '<option value="__new">Нова торбичка</option><option value="">Без торбичка</option>';
 }
+/* barcode, title, author, publisher and cover: the same in the general form and in the one opened from a bag */
+function addFields(auths, pubs){
+  return (window.__standalone ? '<div class="field">Баркод<button class="btn" data-act="scan">' + ic('barcode') + '<span class="nowrap">Сканирай баркода</span></button>' +
+      '<input id="aIsbn" inputmode="numeric" autocomplete="off" aria-label="Номер под баркода" placeholder="или напиши номера под баркода (978…)">' +
+      '<p class="small" id="aIsbnInfo" role="status" hidden></p></div>' : '') +
+    '<label class="field">Заглавие<input id="aTitle" autocomplete="off"></label>' +
+    '<label class="field">Автор<input id="aAuthor" list="dlAuth" autocomplete="off"></label>' +
+    '<label class="field">Издателство<input id="aPub" list="dlPub" autocomplete="off"></label>' +
+    '<datalist id="dlAuth">' + Object.keys(auths).map(function(a){ return '<option value="' + esc(a) + '">'; }).join('') + '</datalist>' +
+    '<datalist id="dlPub">' + Object.keys(pubs).map(function(p){ return '<option value="' + esc(p) + '">'; }).join('') + '</datalist>' +
+    (S.assets ? '<div class="field">Корица<div class="rowbtns"><button class="btn quiet" data-act="add-photo-cam">' + ic('camera') + '<span class="nowrap">Снимай корица</span></button><button class="btn quiet" data-act="add-photo">' + ic('upload') + '<span class="nowrap">Качи корица</span></button></div>' +
+      '<div class="add-cover" id="aCover" hidden><img alt=""><span class="small">Корицата е избрана.</span></div></div>' : '');
+}
 function sheetAdd(){
   var pubs = {}; S.books.forEach(function(b){ if (b.publisher) pubs[b.publisher] = 1; });
   var auths = {}; S.books.forEach(function(b){ if (b.author) auths[b.author] = 1; });
-  var pre = S.sheet && S.sheet.list;
+  var pre = S.sheet && S.sheet.list, bag = pre ? listById(pre) : null;
+  if (bag){
+    var oldB = S.sheet.swap ? S.books.get(S.sheet.swap) : null, bagName = listTitle(bag).replace(/\.$/, '');
+    return '<h2 class="sheet-title" id="sheetTitle">Нова книга</h2><div class="stack">' +
+      '<p class="preview">' + esc(oldB ? 'Влиза в ' + bagName + ' на мястото на „' + oldB.title + '“.' : S.sheet.res ? 'Влиза като резерва в ' + bagName + '.' : 'Влиза в ' + bagName + '.') + '</p>' +
+      addFields(auths, pubs) +
+      (manyLibs() ? '<label class="field">Коя библиотека' + libSelect('id="aLibId"', bag.libId || lastLibId()) + '</label>' : '') +
+      '<div class="rowbtns"><button class="btn quiet" data-act="add-back">' + ic('left') + 'Назад</button>' +
+      '<button class="btn primary" data-act="add-one">' + ic('plus') + '<span class="nowrap">Добави в торбичката</span></button></div></div>';
+  }
   var h = '<h2 class="sheet-title" id="sheetTitle">Добави книги</h2>' +
     '<div class="seg" role="group" aria-label="Начин на добавяне">' +
     '<button data-act="add-mode" data-v="one" aria-pressed="' + (S.addMode === 'one') + '">Една книга</button>' +
     '<button data-act="add-mode" data-v="bulk" aria-pressed="' + (S.addMode === 'bulk') + '">Цял списък</button></div>';
   if (S.addMode === 'one'){
-    h += '<div class="stack">' +
-      (window.__standalone ? '<div class="field">Баркод<button class="btn" data-act="scan">' + ic('barcode') + '<span class="nowrap">Сканирай баркода</span></button>' +
-        '<input id="aIsbn" inputmode="numeric" autocomplete="off" aria-label="Номер под баркода" placeholder="или напиши номера под баркода (978…)">' +
-        '<p class="small" id="aIsbnInfo" role="status" hidden></p></div>' : '') +
-      '<label class="field">Заглавие<input id="aTitle" autocomplete="off"></label>' +
-      '<label class="field">Автор<input id="aAuthor" list="dlAuth" autocomplete="off"></label>' +
-      '<label class="field">Издателство<input id="aPub" list="dlPub" autocomplete="off"></label>' +
-      '<datalist id="dlAuth">' + Object.keys(auths).map(function(a){ return '<option value="' + esc(a) + '">'; }).join('') + '</datalist>' +
-      '<datalist id="dlPub">' + Object.keys(pubs).map(function(p){ return '<option value="' + esc(p) + '">'; }).join('') + '</datalist>' +
-      (S.assets ? '<div class="field">Корица<div class="rowbtns"><button class="btn quiet" data-act="add-photo-cam">' + ic('camera') + '<span class="nowrap">Снимай корица</span></button><button class="btn quiet" data-act="add-photo">' + ic('upload') + '<span class="nowrap">Качи корица</span></button></div>' +
-        '<div class="add-cover" id="aCover" hidden><img alt=""><span class="small">Корицата е избрана.</span></div></div>' : '') +
+    h += '<div class="stack">' + addFields(auths, pubs) +
       '<label class="checkline"><input type="checkbox" id="aLib" checked> От библиотеката</label>' +
       '<div class="stack" id="aLibWrap">' +
         (manyLibs() ? '<label class="field">Коя библиотека' + libSelect('id="aLibId"', lastLibId()) + '</label>' : '') +
@@ -1487,7 +1512,7 @@ function sheetPick(){
     '<label class="field">Търси<input type="search" id="pq" autocomplete="off" placeholder="Заглавие или автор"></label>' +
     '<div id="pickList">' + pickCandidates() + '</div>' +
     '<div class="rowbtns" style="margin-top:16px"><button class="btn quiet" data-act="pick-back">' + ic('left') + 'Назад</button>' +
-    (a ? '' : '<button class="btn" data-act="pick-new">' + ic('plus') + 'Добави нова книга</button>') + '</div>';
+    '<button class="btn" data-act="pick-new">' + ic('plus') + '<span class="nowrap">Добави нова книга</span></button></div>';
 }
 function borrowPreview(date, libId){
   var lib = libById(libId), due = addDays(date, loanDaysFor(lib));
@@ -1941,13 +1966,17 @@ function addOne(){
   if (isbn && !isbnOk(isbn)){ toast('Номерът под баркода не изглежда верен. Провери цифрите.'); $('#aIsbn').focus(); return; }
   if (!title && isbn && !findByIsbn(isbn)){ title = AUTO_TITLE + isbn; pending = true; }
   if (!title && !isbn){ tEl.classList.add('bad'); tEl.focus(); toast('Напиши заглавие.'); return; }
-  var author = $('#aAuthor').value.trim(), pub = $('#aPub').value.trim(), lib = $('#aLib').checked, read = $('#aRead').checked;
-  var listSel = lib && !read ? $('#aList').value : '', newName = $('#aNewList').value.trim(), res = $('#aRes').checked;
-  var existing = (isbn && findByIsbn(isbn)) || findByTitle(title), where = '', keep = S.sheet && S.sheet.list;
+  var bag = S.sheet && S.sheet.list && listById(S.sheet.list) ? { list: S.sheet.list, swap: S.sheet.swap || null, res: !!S.sheet.res } : null;
+  var author = $('#aAuthor').value.trim(), pub = $('#aPub').value.trim(), lib = bag ? true : $('#aLib').checked, read = bag ? false : $('#aRead').checked;
+  var listSel = bag ? '' : (lib && !read ? $('#aList').value : ''), newName = bag ? '' : $('#aNewList').value.trim(), res = bag ? false : $('#aRes').checked;
+  var existing = (isbn && findByIsbn(isbn)) || findByTitle(title), where = '', keep = S.sheet && S.sheet.list, bagMsg = '';
   if (existing) title = existing.title;
+  if (bag && existing && (existing.status === 'read' || onLoan(existing))){
+    toast('„' + title + '“ вече я има и е ' + (existing.status === 'read' ? 'прочетена' : 'у нас') + ', затова не влиза в торбичката.'); return;
+  }
   setBusy(true);
   var p = existing ? (isbn && !existing.isbn ? upd('books', existing.id, { isbn: isbn }) : Promise.resolve()).then(function(){ return existing.id; })
-    : createBook({ title: title, author: author, publisher: pub, read: read, lib: lib, libId: $('#aLibId') ? $('#aLibId').value : null, wish: !lib && !read && $('#aWish').checked, isbn: isbn, lookup: pending });
+    : createBook({ title: title, author: author, publisher: pub, read: read, lib: lib, libId: $('#aLibId') ? $('#aLibId').value : null, wish: !bag && !lib && !read && $('#aWish').checked, isbn: isbn, lookup: pending });
   var cov = S.pendingCover; S.pendingCover = null;
   p.then(function(bookId){
     if (!cov || !S.assets) return bookId;
@@ -1957,15 +1986,29 @@ function addOne(){
     }, function(e){ photoErr(e); return bookId; });
   }).then(function(bookId){
     var age = pickedAge('#aAge', '#aAgeNew');
+    if (bag){
+      var bagL = listById(bag.list), oldB = bag.swap ? S.books.get(bag.swap) : null;
+      var fixLib = existing && (!isLib(existing) || existing.wish) ? upd('books', bookId, { lib: true, wish: false }) : Promise.resolve(true);
+      return fixLib.then(function(){
+        if (oldB && bookId !== bag.swap && cloneItems(bagL).some(function(it){ return it.b === bag.swap; }))
+          return swapInList(bag.list, bag.swap, bookId).then(function(){ bagMsg = '„' + oldB.title + '“ е сменена с „' + title + '“.'; });
+        return moveIntoList(bag.list, bookId, bag.res).then(function(asRes){ bagMsg = '„' + title + '“ е в ' + listTitle(bagL, true) + (asRes ? ' като резерва.' : '.'); });
+      });
+    }
     if (listSel === '__auto'){ where = age ? 'торбичка за ' + age : autoTargetLabel(); return enqueue([bookId], null, age); }
     if (listSel === '__new'){ where = newName || namer()(); return createList(where, [{ b: bookId, r: false }], age ? orderInZone(age, 0) : null, age); }
     if (listSel){ var L = listById(listSel); where = L ? listTitle(L) : ''; return addToList(listSel, bookId, res); }
   }).then(function(){
     setBusy(false);
+    if (pending) setTimeout(runPendingLookups, 800);
+    if (bag){
+      toast(bagMsg + (pending ? ' Данните ще се потърсят по баркода, щом има интернет.' : ''));
+      S.sheet = { kind: 'list', id: bag.list }; renderSheet(true); sheetEl.scrollTop = 0;
+      return;
+    }
     toast((existing ? '„' + title + '“ вече я има' : pending ? 'Добавена е само с баркода' : '„' + title + '“ е добавена') + (where ? ', в ' + where + '.' : '.') +
       (pending ? ' Данните ще се потърсят, щом има интернет.' : ''));
-    if (pending) setTimeout(runPendingLookups, 800);
-    S.sheet = { kind: 'add', list: keep }; renderSheet(true);
+    S.sheet = { kind: 'add' }; renderSheet(true);
     var again = $('#aTitle'); if (again) again.focus();
   }, function(e){ setBusy(false); saveFail(e); });
 }
@@ -2655,7 +2698,8 @@ function onSheetClick(e){
     case 'li-swap': S.sheet = { kind: 'pick', id: id, mode: 'swap', book: t.getAttribute('data-b'), q: '' }; renderSheet(true); sheetEl.scrollTop = 0; break;
     case 'li-add': S.sheet = { kind: 'pick', id: id, mode: 'add', book: null, q: '' }; renderSheet(true); sheetEl.scrollTop = 0; break;
     case 'pick-back': S.sheet = { kind: 'list', id: id }; renderSheet(true); break;
-    case 'pick-new': S.addMode = 'one'; S.sheet = { kind: 'add', list: id }; renderSheet(true); sheetEl.scrollTop = 0; break;
+    case 'pick-new': S.pendingCover = null; S.sheet = { kind: 'add', list: id, swap: S.sheet.book || null, res: !!S.sheet.res }; renderSheet(true); sheetEl.scrollTop = 0; break;
+    case 'add-back': S.pendingCover = null; S.sheet = { kind: 'list', id: S.sheet.list }; renderSheet(true); sheetEl.scrollTop = 0; break;
     case 'pick':
       var sh = S.sheet, pb = t.getAttribute('data-b'), pBook = S.books.get(pb), back = function(){ S.sheet = { kind: 'list', id: sh.id }; renderSheet(true); };
       if (sh.mode === 'swap'){
@@ -2792,7 +2836,7 @@ function applyTheme(t){
 function setTheme(t){ try { if (t) localStorage.setItem('lib.theme', t); else localStorage.removeItem('lib.theme'); } catch (err) {} applyTheme(t); }
 window.__hostTheme = document.documentElement.getAttribute('data-theme') || '';
 applyTheme(getTheme());
-var APP_VERSION = 11;
+var APP_VERSION = 12;
 function start(){
   try { var t = localStorage.getItem('lib.tab'); if (t === 'lists' || t === 'read') S.tab = t; var so = localStorage.getItem('lib.sort'); if (so && SORTS.some(function(o){ return o[0] === so; })) S.sort = so; } catch (err) {}
   renderAll();
