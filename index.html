@@ -438,6 +438,21 @@ html{background:var(--navy)}
 /* sheets */
 .sheet{border-radius:26px 26px 0 0}
 .toast{background:var(--navy);color:#fff;border-radius:999px}
+.pickrow{display:flex;align-items:center;gap:8px}
+.pickrow .checkline{flex:1;min-width:0}
+.pickrow.nope .checkline span{color:var(--muted);text-decoration:line-through}
+.btn.mini.tog{flex:0 0 auto}
+.btn.mini.tog[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.linkbtn{border:0;background:none;padding:6px 0;margin:0;font:inherit;font-weight:600;color:var(--ink);text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.scan{position:fixed;z-index:70;inset:0;display:flex;flex-direction:column;background:#0E0C1C;color:#fff}
+.scan[hidden]{display:none}
+.scan-view{position:relative;flex:1;min-height:0;overflow:hidden}
+.scan-view video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.scan-view i{position:absolute;left:10%;right:10%;top:50%;height:3px;margin-top:-1px;border-radius:2px;background:#FBAF10;box-shadow:0 0 0 2000px rgba(14,12,28,.28)}
+.scan-foot{display:grid;gap:12px;padding:16px 16px calc(16px + env(safe-area-inset-bottom,0px));text-align:center}
+.scan-foot p{font-weight:600}
+.scan-foot .btn{background:#fff;border-color:#fff;color:#2B2547}
 .past-toggle{border-top-color:var(--line)}
 .erow{border-top-color:var(--line)}
 .pick{border-top-color:var(--line)}
@@ -510,6 +525,10 @@ details.lib-sec .stack{margin-top:10px}
 </div>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div class="scan" id="scanWrap" role="dialog" aria-modal="true" aria-label="Сканиране на баркод" hidden>
+  <div class="scan-view"><video playsinline muted></video><i></i></div>
+  <div class="scan-foot"><p id="scanMsg" aria-live="polite"></p><button class="btn" id="scanStop" type="button">Затвори камерата</button></div>
+</div>
 <input type="file" id="filePick" accept="image/*" hidden>
 <input type="file" id="camPick" accept="image/*" capture="environment" hidden>
 <input type="file" id="jsonPick" accept=".zip,.json,application/zip,application/json" hidden>
@@ -779,11 +798,14 @@ function moveIntoList(listId, bId, forceRes){
   return Promise.all([setItems(listId, items)].concat(asRes ? [] : dropFromOthers(listId, bId))).then(function(){ return asRes; });
 }
 /* not available at the library: leaves every upcoming borrowing and goes to "to buy" */
-function markWish(bId){
-  var jobs = [upd('books', bId, { wish: true, lib: false })];
-  upcomingInfos().forEach(function(i){ if (i.items.some(function(it){ return it.b === bId; })) jobs.push(setItems(i.l.id, cloneItems(i.l).filter(function(it){ return it.b !== bId; }))); });
-  return Promise.all(jobs);
+function markWishMany(ids){
+  if (!ids.length) return Promise.resolve(true);
+  var gone = {}; ids.forEach(function(x){ gone[x] = 1; });
+  var jobs = ids.map(function(x){ return upd('books', x, { wish: true, lib: false }); });
+  upcomingInfos().forEach(function(i){ if (i.items.some(function(it){ return gone[it.b]; })) jobs.push(setItems(i.l.id, cloneItems(i.l).filter(function(it){ return !gone[it.b]; }))); });
+  return Promise.all(jobs).then(function(r){ return r.every(Boolean); });
 }
+function markWish(bId){ return markWishMany([bId]); }
 function promoteInList(listId, bId){
   var L = listById(listId); if (!L) return Promise.resolve();
   return Promise.all([setItems(listId, cloneItems(L).map(function(it){ return it.b === bId ? { b: it.b, r: false } : it; }))].concat(dropFromOthers(listId, bId)));
@@ -953,7 +975,8 @@ var IC = {
   repeat: '<path d="M17 3l3 3-3 3M4 11V9a3 3 0 0 1 3-3h13M7 21l-3-3 3-3M20 13v2a3 3 0 0 1-3 3H4"/>',
   cart: '<path d="M3.500 5h2.500l2 10h9.500l2-7.500H7"/><circle cx="9.500" cy="19" r="1.300"/><circle cx="17" cy="19" r="1.300"/>',
   down: '<path d="M12 4v11M8 11l4 4 4-4M5 19h14"/>',
-  mail: '<rect x="3" y="5.500" width="18" height="13" rx="2"/><path d="M4 7.500l8 6 8-6"/>'
+  mail: '<rect x="3" y="5.500" width="18" height="13" rx="2"/><path d="M4 7.500l8 6 8-6"/>',
+  barcode: '<path d="M4 6v12M7.500 6v12M10.500 6v9M13.500 6v9M16.500 6v12M20 6v12"/>'
 };
 function ic(n){ return '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + IC[n] + '</svg>'; }
 var CHECK = '<span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>';
@@ -1030,7 +1053,8 @@ function loansHTML(){
     var pct = Math.max(4, Math.min(100, Math.round((total - left) / total * 100)));
     return '<section class="loan' + (left < 0 ? ' late' : left <= remindDays() ? ' soon' : '') + '">' +
       '<div class="loan-top"><h2>' + esc(name) + '</h2><span class="loan-left">' + leftText(left) + '</span></div>' +
-      '<p class="loan-sub">' + (lage ? 'За ' + esc(lage.replace(/\.$/, '')) + '. ' : '') + (manyLibs() ? libBadge(lib, 'sm') + esc(lib.name) + '. ' : '') + 'Връщане до ' + fmt(due) + ', прочетени ' + readN + ' от ' + bs.length + (ext ? ', удължено ' + ext + ' от 2' : '') + '.' + esc(thursdayNote(due, lib)) + '</p>' +
+      '<p class="loan-sub">' + (lage ? 'За ' + esc(lage.replace(/\.$/, '')) + '. ' : '') + (manyLibs() ? libBadge(lib, 'sm') + esc(lib.name) + '. ' : '') + 'Връщане до ' + fmt(due) + ', прочетени ' + readN + ' от ' + bs.length + (ext ? ', удължено ' + ext + ' от 2' : '') + '.' + esc(thursdayNote(due, lib)) +
+        (S.canWrite ? ' <button class="linkbtn" data-act="loan-date" data-key="' + esc(key) + '">Взети на ' + fmt(bs[0].borrowedAt) + ', смени датата</button>' : ' Взети на ' + fmt(bs[0].borrowedAt) + '.') + '</p>' +
       '<div class="bar"><i style="width:' + pct + '%"></i></div>' +
       '<ul class="rows">' + bs.map(function(b){ return rowHTML(b, true); }).join('') + '</ul>' +
       (S.canWrite ? '<div class="rowbtns">' + calLink(due, bs) +
@@ -1313,11 +1337,11 @@ function sheetBook(id){
         '<div class="rowbtns"><button class="btn quiet" data-act="unreturn">Не е върната</button><button class="btn quiet" data-act="borrow-one">' + ic('bag') + 'Взехме я пак днес</button></div>';
     } else {
       h += '<label class="field">Взета от библиотеката на<input type="date" data-f="borrowedAt" value="" max="' + today() + '"></label>';
-      if (!read) h += '<button class="btn quiet" data-act="wish-mark">' + ic('cart') + 'Няма я в библиотеката, за купуване</button>';
     }
   }
   if (inLists.length) h += '<p class="small">В ' + esc(inLists.join(', ')) + '</p>';
   h += '</div></details>';
+  if (isLib(b) && !b.wish && !read && !b.borrowedAt) h += '<button class="btn quiet" data-act="wish-mark">' + ic('cart') + 'Няма я в библиотеката, за купуване</button>';
   if (S.assets){
     h += '<div class="rowbtns photo-row"><button class="btn quiet" data-act="photo-cam">' + ic('camera') + '<span class="nowrap">Снимай корица</span></button><button class="btn quiet" data-act="photo">' + ic('upload') + '<span class="nowrap">Качи корица</span></button>' +
       (b.cover ? '<button class="btn quiet icon-only" data-act="photo-remove" aria-label="Махни снимката на корицата">' + ic('trash') + '</button>' : '') + '</div>';
@@ -1327,7 +1351,9 @@ function sheetBook(id){
     '<label class="field">Заглавие<input id="eTitle" value="' + esc(b.title) + '"></label>' +
     '<label class="field">Автор<input id="eAuthor" value="' + esc(b.author || '') + '"></label>' +
     '<label class="field">Издателство<input id="ePub" value="' + esc(b.publisher || '') + '"></label>' +
+    (window.__standalone ? '<label class="field">Номер под баркода (ISBN)<input id="eIsbn" inputmode="numeric" autocomplete="off" value="' + esc(b.isbn || '') + '"></label>' : '') +
     '<button class="btn" data-act="save-edit">Запази данните</button>' +
+    (window.__standalone && b.isbn ? '<button class="btn quiet" data-act="isbn-find">' + ic('barcode') + 'Потърси данните по баркода</button>' : '') +
     '<div class="rowbtns">' +
       (read ? '<button class="btn quiet" data-act="unread">Отбележи като непрочетена</button>' : '') +
       (S.confirm === 'del-book'
@@ -1360,6 +1386,9 @@ function sheetAdd(){
     '<button data-act="add-mode" data-v="bulk" aria-pressed="' + (S.addMode === 'bulk') + '">Цял списък</button></div>';
   if (S.addMode === 'one'){
     h += '<div class="stack">' +
+      (window.__standalone ? '<div class="field">Баркод<button class="btn" data-act="scan">' + ic('barcode') + '<span class="nowrap">Сканирай баркода</span></button>' +
+        '<input id="aIsbn" inputmode="numeric" autocomplete="off" aria-label="Номер под баркода" placeholder="или напиши номера под баркода (978…)">' +
+        '<p class="small" id="aIsbnInfo" role="status" hidden></p></div>' : '') +
       '<label class="field">Заглавие<input id="aTitle" autocomplete="off"></label>' +
       '<label class="field">Автор<input id="aAuthor" list="dlAuth" autocomplete="off"></label>' +
       '<label class="field">Издателство<input id="aPub" list="dlPub" autocomplete="off"></label>' +
@@ -1557,19 +1586,186 @@ function sheetBorrow(id){
   var l = listById(id); if (!l) return null;
   var rows = (l.items || []).filter(function(it){ return S.books.has(it.b) && isLib(S.books.get(it.b)); }).map(function(it){
     var b = S.books.get(it.b), out = onLoan(b);
-    return '<label class="checkline"><input type="checkbox" data-b="' + esc(b.id) + '"' +
+    return '<div class="pickrow"><label class="checkline"><input type="checkbox" data-b="' + esc(b.id) + '"' +
       (!it.r && !out && b.status !== 'read' ? ' checked' : '') + (out ? ' disabled' : '') + '> <span>' + esc(b.title) +
-      (it.r ? ' (резерва)' : '') + (out ? ', вече е у нас' : '') + '</span></label>';
+      (it.r ? ' (резерва)' : '') + (out ? ', вече е у нас' : '') + '</span></label>' +
+      (!out && b.status !== 'read' ? '<button type="button" class="btn mini tog" data-act="br-wish" data-b="' + esc(b.id) + '" aria-pressed="false" aria-label="Няма я в библиотеката, за купуване: ' + esc(b.title) + '">' + ic('cart') + '<span class="nowrap">Няма я</span></button>' : '') + '</div>';
   }).join('');
   return '<h2 class="sheet-title" id="sheetTitle">Взети книги</h2><div class="stack">' +
-    '<p class="small">' + esc(listTitle(l).replace(/\.$/, '')) + '. Отметни кои книги взехте наистина.</p>' +
+    '<p class="small">' + esc(listTitle(l).replace(/\.$/, '')) + '. Отметни кои книги взехте наистина. Ако някоя я няма в библиотеката, натисни „Няма я“ до нея и тя отива в „За купуване“.</p>' +
     (manyLibs() ? '<label class="field">От коя библиотека' + libSelect('id="brLib"', l.libId || lastLibId()) + '</label>' : '') +
-    '<label class="field">Дата на взимане<input type="date" id="brDate" value="' + today() + '" max="' + today() + '"></label>' +
+    '<div class="field">Кога ги взехте' + dateChips('brDate', today()) + '<input type="date" id="brDate" aria-label="Дата на взимане" value="' + today() + '" max="' + today() + '"></div>' +
     '<p class="preview" id="brDue">' + esc(borrowPreview(today(), manyLibs() ? (l.libId || lastLibId()) : libs()[0].id)) + '</p>' +
     '<div id="brHours">' + hoursHTML(libById(manyLibs() ? (l.libId || lastLibId()) : libs()[0].id)) + '</div>' +
     '<div class="picks">' + rows + '</div>' +
     '<button class="btn primary block" data-act="save-borrow">' + ic('check') + 'Запиши</button></div>';
 }
+function dateChips(inputId, val){
+  var t = today();
+  return '<div class="chips" role="group" aria-label="Бърз избор на дата">' + [[t, 'Днес'], [addDays(t, -1), 'Вчера'], [addDays(t, -2), 'Онзи ден']].map(function(o){
+    return '<button type="button" class="btn mini tog" data-act="set-date" data-for="' + inputId + '" data-v="' + o[0] + '" aria-pressed="' + (o[0] === val) + '">' + o[1] + '</button>';
+  }).join('') + '</div>';
+}
+function syncChips(inputId){
+  var el = $('#' + inputId); if (!el) return;
+  sheetBody.querySelectorAll('[data-act="set-date"][data-for="' + inputId + '"]').forEach(function(c){ c.setAttribute('aria-pressed', String(c.getAttribute('data-v') === el.value)); });
+}
+function loanDatePreview(bs, date){
+  var lib = libOf(bs[0]);
+  return bs.some(function(b){ return b.dueAt; }) ? 'Срокът е удължаван и остава ' + fmt(dueOf(bs[0])) + '.' : borrowPreview(date, lib.id);
+}
+function sheetLoanDate(key){
+  var bs = loanGroup(key); if (!bs.length) return null;
+  var cur = bs[0].borrowedAt;
+  return '<h2 class="sheet-title" id="sheetTitle">Кога ги взехте</h2><div class="stack">' +
+    '<p class="small">' + esc(plural(bs.length, 'книга', 'книги')) + '. Ако си ги записала по-късно от деня, в който ги взехте, сложи тук истинската дата. Срокът за връщане се смята от нея.</p>' +
+    '<div class="field">Дата на взимане' + dateChips('ldDate', cur) + '<input type="date" id="ldDate" aria-label="Дата на взимане" value="' + esc(cur) + '" max="' + today() + '"></div>' +
+    '<p class="preview" id="ldDue">' + esc(loanDatePreview(bs, cur)) + '</p>' +
+    '<button class="btn primary block" data-act="save-loan-date">' + ic('check') + 'Запиши</button></div>';
+}
+
+/* ---------- barcode (phone build only): scanning works offline, the catalogue search needs internet ---------- */
+var AUTO_TITLE = 'Книга с баркод ';
+function ean13Check(s12){ var sum = 0; for (var i = 0; i < 12; i++) sum += (+s12.charAt(i)) * (i % 2 ? 3 : 1); return (10 - sum % 10) % 10; }
+function isbnOk(s){ return /^97[89]\d{10}$/.test(s) && ean13Check(s) === +s.charAt(12); }
+function cleanIsbn(v){
+  var s = String(v || '').replace(/[^0-9Xx]/g, '').toUpperCase();
+  if (/^\d{9}[0-9X]$/.test(s)){ var core = '978' + s.slice(0, 9); return core + ean13Check(core); }
+  return s;
+}
+function findByIsbn(isbn){ var hit = null; if (isbn) S.books.forEach(function(b){ if (!hit && b.isbn === isbn) hit = b; }); return hit; }
+function fetchJson(url){
+  var ctl = window.AbortController ? new AbortController() : null, tm = setTimeout(function(){ if (ctl) ctl.abort(); }, 9000);
+  return fetch(url, ctl ? { signal: ctl.signal } : {}).then(function(r){ clearTimeout(tm); if (!r.ok) throw new Error('http ' + r.status); return r.json(); }, function(e){ clearTimeout(tm); throw e; });
+}
+/* asks two free public catalogues. Resolves to {title, author, publisher, cover: Blob|null}, to null when neither knows the book, rejects when neither could be reached */
+function lookupIsbn(isbn){
+  if (navigator.onLine === false) return Promise.reject(new Error('offline'));
+  var wrap = function(p){ return p.then(function(v){ return { v: v }; }, function(){ return { err: true }; }); };
+  var g = fetchJson('https://www.googleapis.com/books/v1/volumes?q=isbn:' + isbn + '&maxResults=1').then(function(j){
+    var v = j && j.items && j.items[0] && j.items[0].volumeInfo; if (!v || !v.title) return null;
+    return { title: String(v.title), author: (v.authors || []).join(', '), publisher: v.publisher || '' };
+  });
+  var o = fetchJson('https://openlibrary.org/api/books?bibkeys=ISBN:' + isbn + '&format=json&jscmd=data').then(function(j){
+    var v = j && j['ISBN:' + isbn]; if (!v || !v.title) return null;
+    return { title: String(v.title), author: (v.authors || []).map(function(a){ return a.name; }).filter(Boolean).join(', '),
+      publisher: ((v.publishers || [])[0] || {}).name || '', coverUrl: v.cover ? (v.cover.large || v.cover.medium || '') : '' };
+  });
+  return Promise.all([wrap(g), wrap(o)]).then(function(r){
+    if (r[0].err && r[1].err) throw new Error('offline');
+    var a = r[0].v, b = r[1].v; if (!a && !b) return null;
+    var out = { title: (a && a.title) || (b && b.title) || '', author: (a && a.author) || (b && b.author) || '', publisher: (a && a.publisher) || (b && b.publisher) || '', cover: null };
+    if (!b || !b.coverUrl) return out;
+    return fetch(b.coverUrl).then(function(res){ return res.ok ? res.blob() : null; }).then(function(bl){
+      if (!bl || bl.size < 2000) return out;
+      return shrink(bl).then(function(small){ out.cover = small; return out; }, function(){ return out; });
+    }, function(){ return out; });
+  });
+}
+function isbnInfo(msg){ var el = $('#aIsbnInfo'); if (el){ el.textContent = msg; el.hidden = !msg; } }
+function isbnToForm(){
+  var inp = $('#aIsbn'); if (!inp) return;
+  var isbn = cleanIsbn(inp.value);
+  if (!isbn){ isbnInfo(''); return; }
+  if (!isbnOk(isbn)){ isbnInfo('Номерът не изглежда като баркод на книга. Започва с 978 или 979 и има 13 цифри.'); return; }
+  inp.value = isbn;
+  var dup = findByIsbn(isbn);
+  if (dup){ isbnInfo('Тази книга вече я има: „' + dup.title + '“.'); return; }
+  if (navigator.onLine === false){ isbnInfo('Няма интернет. Баркодът е разчетен: напиши заглавието или направо я добави, а данните ще се потърсят, щом има връзка.'); return; }
+  isbnInfo('Търся книгата…');
+  lookupIsbn(isbn).then(function(r){
+    var now = $('#aIsbn'); if (!now || cleanIsbn(now.value) !== isbn) return;
+    if (!r){ isbnInfo('Няма я в безплатните каталози. Напиши заглавието на ръка.'); var tt = $('#aTitle'); if (tt) tt.focus(); return; }
+    var set = function(sel, v){ var el = $(sel); if (el && !el.value.trim() && v) el.value = v; };
+    set('#aTitle', r.title); set('#aAuthor', r.author); set('#aPub', r.publisher);
+    if (r.cover && !S.pendingCover){ S.pendingCover = r.cover; showPendingCover(); }
+    isbnInfo('Намерих я. Провери данните' + (r.cover || S.pendingCover ? '.' : ' и снимай корицата, в каталога няма снимка.'));
+  }, function(){
+    var now = $('#aIsbn'); if (!now || cleanIsbn(now.value) !== isbn) return;
+    isbnInfo('Каталозите не отговарят в момента. Напиши заглавието или направо я добави, а данните ще се потърсят по-късно.');
+  });
+}
+function applyLookup(id, r){
+  var cur = S.books.get(id); if (!cur) return Promise.resolve(null);
+  var data = { lookup: false }, auto = cur.title.indexOf(AUTO_TITLE) === 0;
+  if (r){
+    if (auto && r.title) data.title = r.title;
+    if (!cur.author && r.author) data.author = r.author;
+    if (!cur.publisher && r.publisher) data.publisher = r.publisher;
+  }
+  var p = upd('books', id, data);
+  if (r && r.cover && !cur.cover && S.assets) p = p.then(function(){
+    return S.assets.upload(r.cover, { type: 'image/jpeg' }).then(function(u){ return upd('books', id, { cover: u.id }); }, function(){});
+  });
+  return p.then(function(){ return r; });
+}
+var lookupBusy = false, lookupFailAt = 0;
+function runPendingLookups(){
+  if (!window.__standalone || lookupBusy || !S.db || !S.canWrite || navigator.onLine === false || Date.now() - lookupFailAt < 60000) return;
+  var b = null; S.books.forEach(function(x){ if (!b && x.lookup && x.isbn) b = x; });
+  if (!b) return;
+  lookupBusy = true;
+  lookupIsbn(b.isbn).then(function(r){ return applyLookup(b.id, r); }).then(function(r){
+    lookupBusy = false;
+    toast(r && r.title ? '„' + r.title + '“: данните са попълнени по баркода.' : 'Книгата с баркод ' + b.isbn + ' я няма в каталозите. Напиши заглавието ѝ на ръка.');
+    setTimeout(runPendingLookups, 1500);
+  }, function(){ lookupBusy = false; lookupFailAt = Date.now(); });
+}
+window.addEventListener('online', function(){ lookupFailAt = 0; setTimeout(runPendingLookups, 1500); });
+
+var SCAN = { stream: null, timer: null, det: null, cb: null, busy: false, on: false };
+function loadScript(src){ return new Promise(function(res, rej){ var s = document.createElement('script'); s.src = src; s.onload = function(){ res(); }; s.onerror = function(){ rej(new Error('load')); }; document.head.appendChild(s); }); }
+/* the phone's own reader when it has one (Android), otherwise the reader shipped with the app in lib/ (iPhone) */
+function getDetector(){
+  if (SCAN.det) return Promise.resolve(SCAN.det);
+  var nat = window.BarcodeDetector && window.BarcodeDetector.getSupportedFormats
+    ? window.BarcodeDetector.getSupportedFormats().then(function(f){ return f.indexOf('ean_13') >= 0; }, function(){ return false; }) : Promise.resolve(false);
+  return nat.then(function(ok){
+    if (ok) return new window.BarcodeDetector({ formats: ['ean_13'] });
+    return (window.BarcodeDetectionAPI ? Promise.resolve() : loadScript('lib/barcode.js')).then(function(){
+      window.BarcodeDetectionAPI.prepareZXingModule({ overrides: { locateFile: function(path){ return 'lib/' + path; } } });
+      return new window.BarcodeDetectionAPI.BarcodeDetector({ formats: ['ean_13'] });
+    });
+  }).then(function(d){ SCAN.det = d; return d; });
+}
+function stopScan(){
+  clearTimeout(SCAN.timer); SCAN.on = false; SCAN.cb = null; SCAN.busy = false;
+  if (SCAN.stream){ SCAN.stream.getTracks().forEach(function(t){ t.stop(); }); SCAN.stream = null; }
+  var w = $('#scanWrap'); if (w){ w.hidden = true; w.querySelector('video').srcObject = null; }
+}
+function startScan(cb){
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ toast('Камерата не е достъпна тук. Напиши номера под баркода.'); return; }
+  var wrap = $('#scanWrap'), video = wrap.querySelector('video'), msg = $('#scanMsg');
+  SCAN.cb = cb; SCAN.on = true; wrap.hidden = false; msg.textContent = 'Пускам камерата…';
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false }).then(function(stream){
+    if (!SCAN.on){ stream.getTracks().forEach(function(t){ t.stop(); }); return; }
+    SCAN.stream = stream; video.srcObject = stream; var pl = video.play(); if (pl && pl.catch) pl.catch(function(){});
+    return getDetector().then(function(det){
+      if (!SCAN.on) return;
+      msg.textContent = 'Насочи камерата към баркода на гърба на книгата.';
+      var tick = function(){
+        if (!SCAN.on) return;
+        if (video.readyState < 2 || SCAN.busy){ SCAN.timer = setTimeout(tick, 150); return; }
+        SCAN.busy = true;
+        det.detect(video).then(function(codes){
+          SCAN.busy = false; if (!SCAN.on) return;
+          var hit = '', other = false;
+          (codes || []).forEach(function(c){ var v = cleanIsbn(c.rawValue); if (isbnOk(v)){ if (!hit) hit = v; } else other = true; });
+          if (hit){ var f = SCAN.cb; stopScan(); if (navigator.vibrate) navigator.vibrate(60); if (f) f(hit); return; }
+          if (other) msg.textContent = 'Това не е баркодът на книгата. Търси онзи с номер, започващ с 978.';
+          SCAN.timer = setTimeout(tick, 180);
+        }, function(){ SCAN.busy = false; SCAN.timer = setTimeout(tick, 500); });
+      };
+      tick();
+    });
+  }).catch(function(e){
+    if (window.console) console.error(e);
+    var denied = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
+    stopScan();
+    toast(denied ? 'Няма разрешение за камерата. Разреши я в настройките на телефона или напиши номера под баркода.' : 'Камерата не тръгна. Напиши номера под баркода.');
+  });
+}
+$('#scanStop').addEventListener('click', stopScan);
 function idleCalLink(){
   var n = idleDays(), d = addDays(today(), n).replace(/-/g, '');
   var url = 'https://calendar.google.com/calendar/render?action=TEMPLATE' +
@@ -1653,7 +1849,7 @@ function renderSheet(force){
     if (a && sheetBody.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
     if (S.sheet.kind !== 'book') return; /* forms keep what is typed */
   }
-  var k = S.sheet.kind, html = k === 'book' ? sheetBook(S.sheet.id) : k === 'add' ? sheetAdd() : k === 'list' ? sheetList(S.sheet.id) : k === 'pick' ? sheetPick() : k === 'extend' ? sheetExtend(S.sheet.id) : k === 'lib' ? sheetLib(S.sheet.id) : k === 'recap' ? sheetRecap(S.sheet.id) : k === 'search' ? sheetSearch() : k === 'borrow' ? sheetBorrow(S.sheet.id) : sheetSettings();
+  var k = S.sheet.kind, html = k === 'book' ? sheetBook(S.sheet.id) : k === 'add' ? sheetAdd() : k === 'list' ? sheetList(S.sheet.id) : k === 'pick' ? sheetPick() : k === 'extend' ? sheetExtend(S.sheet.id) : k === 'lib' ? sheetLib(S.sheet.id) : k === 'recap' ? sheetRecap(S.sheet.id) : k === 'search' ? sheetSearch() : k === 'borrow' ? sheetBorrow(S.sheet.id) : k === 'loandate' ? sheetLoanDate(S.sheet.id) : sheetSettings();
   if (html == null){ closeSheet(); return; }
   var openState = {}, had = false;
   sheetBody.querySelectorAll('details').forEach(function(d, n){ openState[d.getAttribute('data-k') || 'n' + n] = d.open; had = true; });
@@ -1673,6 +1869,7 @@ function openSheet(kind, id){
   sheetEl.scrollTop = 0; sheetEl.setAttribute('aria-labelledby', 'sheetTitle'); sheetEl.focus();
 }
 function closeSheet(){
+  if (SCAN.on) stopScan();
   var a = document.activeElement;
   if (a && sheetBody.contains(a) && a.blur) a.blur(); /* commits a note being typed */
   S.sheet = null; S.confirm = null;
@@ -1726,7 +1923,8 @@ function createBook(data){
   return ref.set({
     title: data.title, author: data.author || '', publisher: data.publisher || '',
     status: data.read ? 'read' : 'toRead', readAt: data.read ? today() : null,
-    fav: false, note: '', cover: null, wish: !!data.wish, lib: data.lib !== false, libId: data.lib !== false ? (data.libId || libs()[0].id) : null, addedAt: new Date().toISOString()
+    fav: false, note: '', cover: null, wish: !!data.wish, lib: data.lib !== false, libId: data.lib !== false ? (data.libId || libs()[0].id) : null, addedAt: new Date().toISOString(),
+    isbn: data.isbn || '', lookup: !!data.lookup
   }).then(function(){ return ref.id; });
 }
 function createList(name, items, order, age){
@@ -1739,12 +1937,17 @@ function setBusy(v){ S.busy = v; sheetBody.querySelectorAll('.btn.primary').forE
 function addOne(){
   if (S.busy) return;
   var tEl = $('#aTitle'), title = tEl.value.trim();
-  if (!title){ tEl.classList.add('bad'); tEl.focus(); toast('Напиши заглавие.'); return; }
+  var isbn = $('#aIsbn') ? cleanIsbn($('#aIsbn').value) : '', pending = false;
+  if (isbn && !isbnOk(isbn)){ toast('Номерът под баркода не изглежда верен. Провери цифрите.'); $('#aIsbn').focus(); return; }
+  if (!title && isbn && !findByIsbn(isbn)){ title = AUTO_TITLE + isbn; pending = true; }
+  if (!title && !isbn){ tEl.classList.add('bad'); tEl.focus(); toast('Напиши заглавие.'); return; }
   var author = $('#aAuthor').value.trim(), pub = $('#aPub').value.trim(), lib = $('#aLib').checked, read = $('#aRead').checked;
   var listSel = lib && !read ? $('#aList').value : '', newName = $('#aNewList').value.trim(), res = $('#aRes').checked;
-  var existing = findByTitle(title), where = '', keep = S.sheet && S.sheet.list;
+  var existing = (isbn && findByIsbn(isbn)) || findByTitle(title), where = '', keep = S.sheet && S.sheet.list;
+  if (existing) title = existing.title;
   setBusy(true);
-  var p = existing ? Promise.resolve(existing.id) : createBook({ title: title, author: author, publisher: pub, read: read, lib: lib, libId: $('#aLibId') ? $('#aLibId').value : null, wish: !lib && !read && $('#aWish').checked });
+  var p = existing ? (isbn && !existing.isbn ? upd('books', existing.id, { isbn: isbn }) : Promise.resolve()).then(function(){ return existing.id; })
+    : createBook({ title: title, author: author, publisher: pub, read: read, lib: lib, libId: $('#aLibId') ? $('#aLibId').value : null, wish: !lib && !read && $('#aWish').checked, isbn: isbn, lookup: pending });
   var cov = S.pendingCover; S.pendingCover = null;
   p.then(function(bookId){
     if (!cov || !S.assets) return bookId;
@@ -1759,7 +1962,9 @@ function addOne(){
     if (listSel){ var L = listById(listSel); where = L ? listTitle(L) : ''; return addToList(listSel, bookId, res); }
   }).then(function(){
     setBusy(false);
-    toast((existing ? 'Книгата вече я има' : '„' + title + '“ е добавена') + (where ? ', в ' + where + '.' : '.'));
+    toast((existing ? '„' + title + '“ вече я има' : pending ? 'Добавена е само с баркода' : '„' + title + '“ е добавена') + (where ? ', в ' + where + '.' : '.') +
+      (pending ? ' Данните ще се потърсят, щом има интернет.' : ''));
+    if (pending) setTimeout(runPendingLookups, 800);
     S.sheet = { kind: 'add', list: keep }; renderSheet(true);
     var again = $('#aTitle'); if (again) again.focus();
   }, function(e){ setBusy(false); saveFail(e); });
@@ -2265,16 +2470,59 @@ function onSheetClick(e){
     case 'unreturn': if (b) upd('books', id, { returnedAt: null }).then(function(){ renderSheet(true); }); break;
     case 'return-one': if (b) upd('books', id, { returnedAt: today() }).then(function(ok){ if (ok) toast('Отбелязана като върната.'); renderSheet(true); }); break;
     case 'save-borrow':
-      var bDate = $('#brDate').value || today(), picked = [];
+      var bDate = $('#brDate').value || today(), picked = [], gone = [];
+      if (bDate > today()){ toast('Датата на взимане не може да е след днес.'); break; }
       sheetBody.querySelectorAll('input[data-b]:checked').forEach(function(c){ if (!c.disabled) picked.push(c.getAttribute('data-b')); });
-      if (!picked.length){ toast('Отметни поне една книга.'); break; }
+      sheetBody.querySelectorAll('button[data-act="br-wish"][aria-pressed="true"]').forEach(function(x){ var gid = x.getAttribute('data-b'); if (picked.indexOf(gid) < 0) gone.push(gid); });
+      if (!picked.length && !gone.length){ toast('Отметни поне една книга.'); break; }
       setBusy(true);
       var listId = id, brLibId = $('#brLib') ? $('#brLib').value : libs()[0].id;
-      rememberLib(brLibId);
-      Promise.all(picked.map(function(bid){ return upd('books', bid, { borrowedAt: bDate, returnedAt: null, dueAt: null, ext: 0, lib: true, libId: brLibId }); }).concat([upd('lists', listId, { takenAt: bDate, libId: brLibId })])).then(function(r){
+      var brJobs = [markWishMany(gone)];
+      if (picked.length){
+        rememberLib(brLibId);
+        brJobs = brJobs.concat(picked.map(function(bid){ return upd('books', bid, { borrowedAt: bDate, returnedAt: null, dueAt: null, ext: 0, lib: true, libId: brLibId }); }), [upd('lists', listId, { takenAt: bDate, libId: brLibId })]);
+      }
+      Promise.all(brJobs).then(function(r){
         setBusy(false);
-        if (r.every(Boolean)){ closeSheet(); window.scrollTo(0, 0); toast('Записано. Връщане до ' + fmt(addDays(bDate, loanDaysFor(libById(brLibId)))) + '.'); }
+        if (!r.every(Boolean)) return;
+        closeSheet(); window.scrollTo(0, 0);
+        var wishMsg = gone.length ? (gone.length === 1 ? 'Една книга отиде' : gone.length + ' книги отидоха') + ' в „За купуване“.' : '';
+        toast(picked.length ? 'Записано. Връщане до ' + fmt(addDays(bDate, loanDaysFor(libById(brLibId)))) + '.' + (wishMsg ? ' ' + wishMsg : '') : wishMsg);
       });
+      break;
+    case 'br-wish':
+      var wOn = t.getAttribute('aria-pressed') !== 'true', wRow = t.closest('.pickrow');
+      t.setAttribute('aria-pressed', String(wOn));
+      if (wRow){ wRow.classList.toggle('nope', wOn); if (wOn){ var wBox = wRow.querySelector('input[data-b]'); if (wBox) wBox.checked = false; } }
+      break;
+    case 'set-date':
+      var dEl = $('#' + t.getAttribute('data-for'));
+      if (dEl){ dEl.value = t.getAttribute('data-v'); dEl.dispatchEvent(new Event('input', { bubbles: true })); }
+      break;
+    case 'save-loan-date':
+      var ldDate = $('#ldDate').value, ldBs = loanGroup(id), ldOld = {}, ldIds = {}, ldJobs = [];
+      if (!ldDate || ldDate > today()){ toast('Избери дата не по-късна от днес.'); break; }
+      if (!ldBs.length){ closeSheet(); break; }
+      ldBs.forEach(function(x){ ldOld[x.borrowedAt] = 1; ldIds[x.id] = 1; });
+      var ldDue = ldBs.some(function(x){ return x.dueAt; }) ? 'Срокът остава ' + fmt(dueOf(ldBs[0])) + '.' : 'Връщане до ' + fmt(addDays(ldDate, loanDaysFor(libOf(ldBs[0])))) + '.';
+      S.lists.forEach(function(l){
+        if (!l.takenAt || !ldOld[l.takenAt] || !(l.items || []).some(function(it){ return ldIds[it.b]; })) return;
+        ldJobs.push(upd('lists', l.id, { takenAt: ldDate }));
+        /* books of the same bag that already went back keep belonging to it */
+        (l.items || []).forEach(function(it){ var x = S.books.get(it.b); if (x && !ldIds[x.id] && x.borrowedAt === l.takenAt && x.returnedAt && x.returnedAt >= ldDate) ldJobs.push(upd('books', x.id, { borrowedAt: ldDate })); });
+      });
+      ldBs.forEach(function(x){ ldJobs.push(upd('books', x.id, { borrowedAt: ldDate })); });
+      setBusy(true);
+      Promise.all(ldJobs).then(function(r){ setBusy(false); if (r.every(Boolean)){ closeSheet(); toast('Записано, взети на ' + fmt(ldDate) + '. ' + ldDue); } });
+      break;
+    case 'scan': startScan(function(code){ var si = $('#aIsbn'); if (si){ si.value = code; isbnToForm(); } }); break;
+    case 'isbn-find':
+      if (b && b.isbn){
+        toast('Търся книгата…');
+        lookupIsbn(b.isbn).then(function(r){ return applyLookup(id, r); }).then(function(r){
+          toast(r ? 'Попълних каквото липсваше.' : 'Няма я в безплатните каталози.'); renderSheet(true);
+        }, function(){ toast('Няма връзка с каталозите. Опитай пак, когато има интернет.'); });
+      }
       break;
     case 'photo': S.photoFor = id; filePick.click(); break;
     case 'photo-cam': S.photoFor = id; camPick.click(); break;
@@ -2287,7 +2535,13 @@ function onSheetClick(e){
       if (b){
         var nt = $('#eTitle').value.trim();
         if (!nt){ toast('Заглавието не може да е празно.'); break; }
-        upd('books', id, { title: nt, author: $('#eAuthor').value.trim(), publisher: $('#ePub').value.trim() })
+        var eData = { title: nt, author: $('#eAuthor').value.trim(), publisher: $('#ePub').value.trim() };
+        if ($('#eIsbn')){
+          var eIsbn = cleanIsbn($('#eIsbn').value);
+          if (eIsbn && !isbnOk(eIsbn)){ toast('Номерът под баркода не изглежда верен. Провери цифрите.'); break; }
+          eData.isbn = eIsbn;
+        }
+        upd('books', id, eData)
           .then(function(ok){ if (ok) toast('Данните са запазени.'); renderSheet(true); });
       }
       break;
@@ -2437,6 +2691,11 @@ sheetBody.addEventListener('change', function(e){
   if (t.id === 'aLib' || t.id === 'aRead'){ $('#aLibWrap').hidden = !$('#aLib').checked || $('#aRead').checked; $('#aWishWrap').hidden = $('#aLib').checked || $('#aRead').checked; return; }
   if (t.id === 'bLib'){ bulkPreview(); var bw = $('#bLibIdWrap'); if (bw) bw.hidden = !t.checked; return; }
   if (t.id === 'aLibId'){ rememberLib(t.value); return; }
+  if (t.id === 'aIsbn'){ isbnToForm(); return; }
+  if (t.getAttribute && t.getAttribute('data-b') && t.type === 'checkbox' && t.checked){
+    var pr = t.closest('.pickrow'), pw = pr && pr.querySelector('[data-act="br-wish"]');
+    if (pw){ pw.setAttribute('aria-pressed', 'false'); pr.classList.remove('nope'); return; }
+  }
   if (t.id === 'aAge'){ $('#aAgeNewWrap').hidden = t.value !== '__new'; return; }
   if (t.id === 'bAge'){ $('#bAgeNewWrap').hidden = t.value !== '__new'; return; }
   if (t.id === 'brLib'){ $('#brDue').textContent = borrowPreview($('#brDate').value || today(), t.value); $('#brHours').innerHTML = hoursHTML(libById(t.value)); return; }
@@ -2465,10 +2724,11 @@ sheetBody.addEventListener('input', function(e){
   if (e.target.id === 'lbCardNo') fillLetter(false);
   if (e.target.id === 'pq' && S.sheet && S.sheet.kind === 'pick'){ S.sheet.q = e.target.value; $('#pickList').innerHTML = pickCandidates(); }
   if (e.target.id === 'aTitle') e.target.classList.remove('bad');
-  if (e.target.id === 'brDate' && e.target.value) $('#brDue').textContent = borrowPreview(e.target.value, $('#brLib') ? $('#brLib').value : libs()[0].id);
+  if (e.target.id === 'brDate'){ syncChips('brDate'); if (e.target.value) $('#brDue').textContent = borrowPreview(e.target.value, $('#brLib') ? $('#brLib').value : libs()[0].id); }
+  if (e.target.id === 'ldDate' && S.sheet){ syncChips('ldDate'); var ldG = loanGroup(S.sheet.id); if (e.target.value && ldG.length) $('#ldDue').textContent = loanDatePreview(ldG, e.target.value); }
   if (e.target.id === 'exDate' && e.target.value && S.sheet){ var exLib = libById(String(S.sheet.id).split('|')[0]); $('#exNote').textContent = 'Нов срок ' + fmt(e.target.value) + '.' + thursdayNote(e.target.value, exLib) + cardNote(e.target.value, exLib); }
 });
-document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && S.sheet) closeSheet(); });
+document.addEventListener('keydown', function(e){ if (e.key !== 'Escape') return; if (SCAN.on) stopScan(); else if (S.sheet) closeSheet(); });
 
 view.addEventListener('change', function(e){
   if (e.target.classList && e.target.classList.contains('sortSel')){ S.sort = e.target.value; try { localStorage.setItem('lib.sort', S.sort); } catch (err) {} renderView(); }
@@ -2496,6 +2756,7 @@ view.addEventListener('click', function(e){
   else if (act === 'borrow') openSheet('borrow', id);
   else if (act === 'recap'){ openSheet('recap', id); startRecap(id); }
   else if (act === 'extend') openSheet('extend', t.getAttribute('data-key'));
+  else if (act === 'loan-date') openSheet('loandate', t.getAttribute('data-key'));
   else if (act === 'return'){ S.confirm = 'ret:' + t.getAttribute('data-key'); renderView(); }
   else if (act === 'return-yes'){
     var rkey = t.getAttribute('data-key'), jobs = [];
@@ -2531,7 +2792,7 @@ function applyTheme(t){
 function setTheme(t){ try { if (t) localStorage.setItem('lib.theme', t); else localStorage.removeItem('lib.theme'); } catch (err) {} applyTheme(t); }
 window.__hostTheme = document.documentElement.getAttribute('data-theme') || '';
 applyTheme(getTheme());
-var APP_VERSION = 10;
+var APP_VERSION = 11;
 function start(){
   try { var t = localStorage.getItem('lib.tab'); if (t === 'lists' || t === 'read') S.tab = t; var so = localStorage.getItem('lib.sort'); if (so && SORTS.some(function(o){ return o[0] === so; })) S.sort = so; } catch (err) {}
   renderAll();
@@ -2553,6 +2814,7 @@ function start(){
       var m = new Map();
       snap.docs.forEach(function(d){ var x = d.data() || {}; m.set(d.id, Object.assign({ title: '' }, x, { id: d.id })); });
       S.books = m; S.loaded.books = true; renderAll();
+      if (window.__standalone) setTimeout(runPendingLookups, 2000);
     }, subFail);
     db.collection('lists').onSnapshot(function(snap){
       S.lists = snap.docs.map(function(d){ return Object.assign({ name: '', items: [] }, d.data() || {}, { id: d.id }); })

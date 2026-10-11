@@ -1,10 +1,11 @@
 /* Offline support: keeps the page, fonts and icons on the device. Bump VERSION when index.html changes. */
-const VERSION = 'knizhki-10';
+const VERSION = 'knizhki-11';
 const CORE = ['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon.png',
   './fonts/sofia-sans-cyrillic-400-normal.woff2', './fonts/sofia-sans-cyrillic-600-normal.woff2', './fonts/sofia-sans-cyrillic-800-normal.woff2',
   './fonts/sofia-sans-latin-400-normal.woff2', './fonts/sofia-sans-latin-600-normal.woff2', './fonts/sofia-sans-latin-800-normal.woff2',
   './fonts/sofia-sans-extra-condensed-cyrillic-700-normal.woff2', './fonts/sofia-sans-extra-condensed-cyrillic-900-normal.woff2',
-  './fonts/sofia-sans-extra-condensed-latin-700-normal.woff2', './fonts/sofia-sans-extra-condensed-latin-900-normal.woff2'];
+  './fonts/sofia-sans-extra-condensed-latin-700-normal.woff2', './fonts/sofia-sans-extra-condensed-latin-900-normal.woff2',
+  './lib/barcode.js', './lib/zxing_reader.wasm'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(VERSION).then((c) => c.addAll(CORE)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
